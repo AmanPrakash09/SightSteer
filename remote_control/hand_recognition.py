@@ -1,3 +1,5 @@
+import json
+import sys
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -63,7 +65,6 @@ def stop_or_go(hand_landmarks):
 
 def display_info(stop_or_go, angle_deg, frame):    
     text = f"{stop_or_go}, Angle: {int(angle_deg)} degrees"
-    print(text)
     cv2.putText(frame, text, (10, 50),
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
@@ -123,6 +124,13 @@ def main():
                     # Display information on video
                     display_info(pedal_or_break, angle_deg, frame)
 
+                    # print data as JSON in console for server to read
+                    print(json.dumps({
+                        "state": pedal_or_break,
+                        "angle": int(angle_deg)
+                    }))
+                    sys.stdout.flush()
+            
             # Show frame
             cv2.imshow('Finger Angle Tracker', frame)
             if cv2.waitKey(1) & 0xFF == 27:
