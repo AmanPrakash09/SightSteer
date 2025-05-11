@@ -1,7 +1,7 @@
 [package]
 name = "rc_car"
 version = "0.1.0"
-authors = ["Aman <apraka01@student.ubc.ca>"]
+authors = ["AmanPrakash09 <apraka01@student.ubc.ca>"]
 edition = "2021"
 resolver = "2"
 rust-version = "1.77"
@@ -25,6 +25,12 @@ experimental = ["esp-idf-svc/experimental"]
 [dependencies]
 log = "0.4"
 esp-idf-svc = { version = "0.51", features = ["critical-section", "embassy-time-driver", "embassy-sync"] }
+anyhow = "1.0"
+esp-idf-sys = { version = "0.36", features = ["binstart"] }
+esp-idf-hal = "0.45.2"
+heapless = "0.8"
+embedded-hal = "0.2.7"
+embedded-svc = "0.28.1"
 
 [build-dependencies]
 embuild = "0.33"
