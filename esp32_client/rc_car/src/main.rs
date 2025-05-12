@@ -1,6 +1,9 @@
 use std::{
     thread::sleep,
     time::Duration,
+    io::{BufRead, BufReader},
+    net::{TcpStream, UdpSocket},
+    str,
 };
 use esp_idf_sys as _;
 use esp_idf_hal::{
@@ -14,7 +17,7 @@ use esp_idf_svc::{
 use embedded_svc::wifi::{ClientConfiguration, Configuration};
 
 mod constants;
-use constants::{WIFI_SSID, WIFI_PASSWORD};
+use constants::{WIFI_SSID, WIFI_PASSWORD, DISCOVERY_PORT};
 
 fn heapless_str<const N: usize>(s: &str) -> heapless::String<N> {
     let mut out = heapless::String::<N>::new();
@@ -22,7 +25,7 @@ fn heapless_str<const N: usize>(s: &str) -> heapless::String<N> {
     out
 }
 
-fn main(){
+fn main() -> std::io::Result<()>{
     esp_idf_sys::link_patches(); //Needed for esp32-rs
     esp_idf_svc::log::EspLogger::initialize_default();
 
@@ -31,6 +34,7 @@ fn main(){
     let sys_loop = EspSystemEventLoop::take().unwrap();
     let nvs = EspDefaultNvsPartition::take().unwrap();
 
+    // Connect to WiFi first
     let mut wifi_driver = EspWifi::new(
         peripherals.modem,
         sys_loop,
@@ -64,10 +68,56 @@ fn main(){
         println!("Waiting for station {:?}", config);
         sleep(Duration::from_secs(1));
     }
-    println!("Should be connected now");
-    loop{
-        println!("IP info: {:?}", wifi_driver.sta_netif().get_ip_info().unwrap());
-        sleep(Duration::new(10,0));
+    
+    let ip_info = wifi_driver.sta_netif().get_ip_info().unwrap();
+    println!("Connected to IP Address: {}", ip_info.ip);
+
+    // ----- UDP Discovery -----
+
+    // Bind to discovery port to receive broadcasts
+    let socket = UdpSocket::bind(format!("0.0.0.0:{}", DISCOVERY_PORT))?;
+    let mut buf = [0; 128];
+
+    // Wait for broadcast and extract server's IP and port
+    let (server_ip, server_port) = loop {
+        let (len, src) = socket.recv_from(&mut buf)?;
+        let msg = str::from_utf8(&buf[..len]).unwrap_or("");
+
+        if msg.starts_with("ECHO_SERVER:") {
+            let parts: Vec<&str> = msg.split(':').collect();
+            if parts.len() == 2 {
+                let discovered_port_str = parts[1];
+                if let Ok(discovered_port) = discovered_port_str.parse::<u16>() {
+                    println!(
+                        "Discovered server at {} on port {}",
+                        src.ip(),
+                        discovered_port
+                    );
+                    break (src.ip().to_string(), discovered_port);
+                } else {
+                    eprintln!("Failed to parse port from discovery message: {}", msg);
+                }
+            } else {
+                eprintln!("Invalid discovery message format: {}", msg);
+            }
+        }
+    };
+
+    // ----- TCP Connection -----
+
+    // Connect to server via TCP using extractd server IP and port
+    let addr = format!("{}:{}", server_ip, server_port);
+    println!("Connecting to server at {}...", addr);
+    let stream = TcpStream::connect(addr)?;
+    println!("Connected!");
+
+    // Read and print data from server
+    let reader = BufReader::new(stream);
+    for line in reader.lines() {
+        let line = line?;
+        println!("Received: {}", line);
     }
+
+    Ok(())
 
 }
