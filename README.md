@@ -59,3 +59,9 @@ cargo espflash monitor --port COM3 --baud 74880 --no-stub
 
 ### 7. Press RST Button
 Should see logs and print statements after pressing button
+
+## Flash ESP32 Board and Monitor Serial Output
+```
+cargo espflash flash --release --port COM3 --no-stub
+cargo espflash monitor --port COM3 --baud 115200 --no-stub
+```
