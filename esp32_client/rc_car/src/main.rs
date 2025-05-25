@@ -116,24 +116,34 @@ fn main() -> std::io::Result<()>{
 
     // If ESP32 receives UDP broadcast before server is ready to accept TCP connections, then there is a race condition between discovery and server readiness
     // Need to loop until server is ready and connection is made
-    let stream = loop {
+    // Also, if ESP32 loses WiFi connection during TCP, try to reconnect to WiFi
+    loop {
+        if !wifi_driver.is_connected().unwrap_or(false) {
+            println!("WiFi disconnected. Neet to reconnect ...");
+            let _ = wifi_driver.connect();
+            sleep(Duration::from_secs(1));
+            continue;
+        }
+
         match TcpStream::connect(&addr) {
-            Ok(s) => break s,
+            Ok(stream) => {
+                println!("Connected!");
+                // Read and print data from server
+                let reader = BufReader::new(stream);
+                for line in reader.lines() {
+                    match line {
+                        Ok(data) => println!("Received: {}", data),
+                        Err(e) => {
+                            println!("Connection error: {:?}. Reconnecting ...", e);
+                            break; // If TCP error, break from reading lines and try reconnecting
+                        }
+                    }
+                }
+            }
             Err(e) => {
                 eprintln!("TCP connection failed: {:?}, retrying ...", e);
                 sleep(Duration::from_secs(1));
             }
         }
     };
-    println!("Connected!");
-
-    // Read and print data from server
-    let reader = BufReader::new(stream);
-    for line in reader.lines() {
-        let line = line?;
-        println!("Received: {}", line);
-    }
-
-    Ok(())
-
 }
