@@ -31,8 +31,12 @@ fn broadcast() -> std::io::Result<()> {
     socket.set_broadcast(true)?;
     let msg = format!("ECHO_SERVER:{}", ECHO_PORT);
 
+    // If the UDP broadcast arrives before the ESP32 starts listening, the message is lost
     loop {
-        socket.send_to(msg.as_bytes(), format!("255.255.255.255:{}", DISCOVERY_PORT))?;
+        match socket.send_to(msg.as_bytes(), format!("255.255.255.255:{}", DISCOVERY_PORT)) {
+            Ok(_) => {}
+            Err(e) => eprintln!("UDP broadcast failed: {:?}", e)
+        }
         thread::sleep(Duration::from_secs(2));
     }
 }
@@ -69,10 +73,16 @@ fn main() -> std::io::Result<()> {
     let listener = TcpListener::bind(format!("0.0.0.0:{}", ECHO_PORT))?;
     println!("Server listening on port {}", ECHO_PORT);
 
+    // Accept incoming TCP connections and spawn a new thread for each client
+    // Each thread handles the client independently and logs errors if they occur
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                handle_client(stream)?;
+                thread::spawn(move || {
+                    if let Err(e) = handle_client(stream) {
+                        eprintln!("Client error: {:?}", e);
+                    }
+                });
             }
             Err(e) => {
                 eprintln!("Failed to accept connection: {}", e);

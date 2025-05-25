@@ -63,14 +63,19 @@ fn main() -> std::io::Result<()>{
     }
 
     wifi_driver.connect().unwrap();
-    while !wifi_driver.is_connected().unwrap(){
-        let config = wifi_driver.get_configuration().unwrap();
-        println!("Waiting for station {:?}", config);
+
+    // If wifi_driver.sta_netif().get_ip_info().unwrap() return 0.0.0.0, then any socket connection will fail
+    // Need to wait until DHCP assign valid IP
+    loop {
+        let connected = wifi_driver.is_connected().unwrap();
+        let ip_info = wifi_driver.sta_netif().get_ip_info().unwrap();
+        if connected && ip_info.ip.to_string() != "0.0.0.0" {
+            println!("Connected to IP Address: {}", ip_info.ip);
+            break;
+        }
+        println!("Waiting for connection and until DHCP assigns vaild IP. Current IP: {}", ip_info.ip);
         sleep(Duration::from_secs(1));
     }
-    
-    let ip_info = wifi_driver.sta_netif().get_ip_info().unwrap();
-    println!("Connected to IP Address: {}", ip_info.ip);
 
     // ----- UDP Discovery -----
 
@@ -108,16 +113,37 @@ fn main() -> std::io::Result<()>{
     // Connect to server via TCP using extractd server IP and port
     let addr = format!("{}:{}", server_ip, server_port);
     println!("Connecting to server at {}...", addr);
-    let stream = TcpStream::connect(addr)?;
-    println!("Connected!");
 
-    // Read and print data from server
-    let reader = BufReader::new(stream);
-    for line in reader.lines() {
-        let line = line?;
-        println!("Received: {}", line);
-    }
+    // If ESP32 receives UDP broadcast before server is ready to accept TCP connections, then there is a race condition between discovery and server readiness
+    // Need to loop until server is ready and connection is made
+    // Also, if ESP32 loses WiFi connection during TCP, try to reconnect to WiFi
+    loop {
+        if !wifi_driver.is_connected().unwrap_or(false) {
+            println!("WiFi disconnected. Neet to reconnect ...");
+            let _ = wifi_driver.connect();
+            sleep(Duration::from_secs(1));
+            continue;
+        }
 
-    Ok(())
-
+        match TcpStream::connect(&addr) {
+            Ok(stream) => {
+                println!("Connected!");
+                // Read and print data from server
+                let reader = BufReader::new(stream);
+                for line in reader.lines() {
+                    match line {
+                        Ok(data) => println!("Received: {}", data),
+                        Err(e) => {
+                            println!("Connection error: {:?}. Reconnecting ...", e);
+                            break; // If TCP error, break from reading lines and try reconnecting
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("TCP connection failed: {:?}, retrying ...", e);
+                sleep(Duration::from_secs(1));
+            }
+        }
+    };
 }
